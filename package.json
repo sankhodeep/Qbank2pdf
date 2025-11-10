@@ -1,0 +1,12 @@
+{
+  "name": "pdf-generator",
+  "version": "1.0.0",
+  "description": "A Puppeteer script to generate PDFs from HTML.",
+  "main": "generate_pdf.js",
+  "scripts": {
+    "start": "node generate_pdf.js"
+  },
+  "dependencies": {
+    "puppeteer": "^22.0.0"
+  }
+}
