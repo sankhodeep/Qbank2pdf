@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import threading
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -8,6 +9,13 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from pdf_processor import PdfWorker
+
+def natural_sort_key(s):
+    """
+    A key function for natural sorting.
+    Splits the string into a list of strings and numbers.
+    """
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'([0-9]+)', s)]
 
 # --- Folder Selection Dialog ---
 class FolderSelectionDialog(QDialog):
@@ -121,7 +129,9 @@ class MainWindow(QMainWindow):
 
         try:
             # Find all subdirectories in the selected root folder
-            subfolders = sorted([d for d in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, d))])
+            subfolders = [d for d in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, d))]
+            subfolders.sort(key=natural_sort_key) # Use natural sorting
+
             if not subfolders:
                 QMessageBox.information(self, "No Folders", "No sub-folders found in the selected directory.")
                 self.selected_folders = []
