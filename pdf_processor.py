@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import threading
 import sys
+import markdown
 from PySide6.QtCore import QObject, Signal
 
 class WorkerSignals(QObject):
@@ -128,7 +129,9 @@ class PdfWorker(QObject):
         Converts a single question JSON object into its HTML representation.
         """
         q_html = f"<h1>Question {question.get('question_number', '')}</h1>"
-        q_html += f"<p>{question.get('text', '')}</p>"
+        # Convert markdown text to HTML
+        question_text_html = markdown.markdown(question.get('text', ''), extensions=['tables'])
+        q_html += f"<div class='question-text'>{question_text_html}</div>"
 
         # --- Handle Question Image ---
         if question.get('question_media_path'):
