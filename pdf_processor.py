@@ -135,10 +135,12 @@ class PdfWorker(QObject):
 
         # --- Handle Question Image ---
         if question.get('question_media_path'):
-            img_path = os.path.join(question['base_path'], question['question_media_path'])
+            # Normalize path separators for cross-platform compatibility
+            media_path = question['question_media_path'].replace('\\', '/')
+            img_path = os.path.join(question['base_path'], media_path)
             if os.path.exists(img_path):
-                # Use absolute file URI for local images
-                img_uri = f"file:///{os.path.abspath(img_path)}"
+                # Use absolute file URI for local images, ensuring forward slashes
+                img_uri = f"file:///{os.path.abspath(img_path).replace(os.sep, '/')}"
                 q_html += f'<img src="{img_uri}" alt="Question Image" style="max-width: 100%; height: auto;"/>'
 
         # --- Handle Options ---
@@ -160,9 +162,10 @@ class PdfWorker(QObject):
             if element.get('type') == 'text':
                 q_html += f"<p>{element.get('content', '')}</p>"
             elif element.get('type') == 'image':
-                img_path = os.path.join(question['base_path'], element.get('path', ''))
+                media_path = element.get('path', '').replace('\\', '/')
+                img_path = os.path.join(question['base_path'], media_path)
                 if os.path.exists(img_path):
-                    img_uri = f"file:///{os.path.abspath(img_path)}"
+                    img_uri = f"file:///{os.path.abspath(img_path).replace(os.sep, '/')}"
                     q_html += f'<img src="{img_uri}" alt="Explanation Image" style="max-width: 100%; height: auto;"/>'
             elif element.get('type') == 'table_processed_vlm':
                 # Convert the JSON table data into an HTML table
