@@ -28,25 +28,68 @@ class FolderSelectionDialog(QDialog):
         self.setGeometry(200, 200, 500, 600)
         layout = QVBoxLayout(self)
 
+        # --- Folder Selection Input ---
+        selection_layout = QHBoxLayout()
+        self.folder_input = QLineEdit()
+        self.folder_input.setPlaceholderText("e.g., 1, 3, 5-10")
+        selection_layout.addWidget(self.folder_input)
+        
+        apply_button = QPushButton("Apply Selection")
+        apply_button.clicked.connect(self.apply_folder_selection)
+        selection_layout.addWidget(apply_button)
+        layout.addLayout(selection_layout)
+        
         self.list_widget = QListWidget()
-        # Enable drag-and-drop to reorder items
         self.list_widget.setDragDropMode(QListWidget.InternalMove)
 
-        # Populate the list with the found sub-folders
         for folder in folders:
             item = QListWidgetItem(folder)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked) # Default to checked
+            item.setCheckState(Qt.Unchecked)  # Default to unchecked
             self.list_widget.addItem(item)
 
         layout.addWidget(self.list_widget)
 
-        # Standard OK and Cancel buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
 
+    def apply_folder_selection(self):
+        """
+        Applies the selection from the input string to the list widget.
+        """
+        try:
+            # --- Parse the input string ---
+            input_text = self.folder_input.text()
+            selected_numbers = set()
+            parts = [p.strip() for p in input_text.split(',') if p.strip()]
+            for part in parts:
+                if '-' in part:
+                    start, end = map(int, part.split('-'))
+                    selected_numbers.update(range(start, end + 1))
+                else:
+                    selected_numbers.add(int(part))
+            
+            # --- Apply to the list widget ---
+            for i in range(self.list_widget.count()):
+                item = self.list_widget.item(i)
+                folder_name = item.text()
+                # Extract leading number from folder name
+                # Look for the pattern 'output_[number]' to get the module number
+                match = re.search(r'output_(\d+)', folder_name)
+                if match:
+                    folder_num = int(match.group(1))
+                    if folder_num in selected_numbers:
+                        item.setCheckState(Qt.Checked)
+                    else:
+                        item.setCheckState(Qt.Unchecked)
+
+
+
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please use numbers and ranges (e.g., 1, 5-10).")
+            
     def get_selected_folders_in_order(self):
         """
         Retrieves the list of checked folders in their current order.

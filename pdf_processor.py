@@ -5,6 +5,8 @@ import tempfile
 import threading
 import sys
 import markdown
+import base64
+import mimetypes
 from PySide6.QtCore import QObject, Signal
 
 class WorkerSignals(QObject):
@@ -139,8 +141,8 @@ class PdfWorker(QObject):
             media_path = question['question_media_path'].replace('\\', '/')
             img_path = os.path.join(question['base_path'], media_path)
             if os.path.exists(img_path):
-                # Use absolute file URI for local images, ensuring forward slashes
-                img_uri = f"file:///{os.path.abspath(img_path).replace(os.sep, '/')}"
+                # Convert image to base64 and embed it directly in the HTML
+                img_uri = self._image_to_base64_uri(img_path)
                 q_html += f'<img src="{img_uri}" alt="Question Image" style="max-width: 100%; height: auto;"/>'
 
         # --- Handle Options ---
@@ -156,6 +158,11 @@ class PdfWorker(QObject):
         # --- Display Correct Answer in Bold ---
         q_html += f"<p><b>Correct Answer: {correct_answer_text}</b></p>"
 
+        # --- Handle Labels (Question Tags) ---
+        if question.get('labels'):
+            labels_html = " ".join([f"<span class='label'>{label}</span>" for label in question.get('labels', [])])
+            q_html += f"<div class='labels-container'>{labels_html}</div>"
+
         # --- Handle Explanation Elements ---
         q_html += "<h2>Explanation</h2>"
         for element in question.get('explanation_elements', []):
@@ -165,7 +172,7 @@ class PdfWorker(QObject):
                 media_path = element.get('path', '').replace('\\', '/')
                 img_path = os.path.join(question['base_path'], media_path)
                 if os.path.exists(img_path):
-                    img_uri = f"file:///{os.path.abspath(img_path).replace(os.sep, '/')}"
+                    img_uri = self._image_to_base64_uri(img_path)
                     q_html += f'<img src="{img_uri}" alt="Explanation Image" style="max-width: 100%; height: auto;"/>'
             elif element.get('type') == 'table_processed_vlm':
                 # Convert the JSON table data into an HTML table
@@ -183,13 +190,14 @@ class PdfWorker(QObject):
                         q_html += "</tr>"
                     q_html += "</tbody></table>"
 
-        q_html += "<hr style='border: 1px solid #eaeaea; margin: 2em 0;'>" # Separator for questions
+        q_html += "<div class='page-break'></div>" # Adds a page break after each question
         return q_html
 
     def _get_css_styles(self):
         """Returns the CSS string to be embedded in the HTML."""
         return """
         @page { margin: 1cm; }
+        .page-break { page-break-after: always; }
         body { font-family: 'Roboto', 'Noto Color Emoji', sans-serif; font-size: 13pt; font-weight: 400; line-height: 1.5; color: #1a1a1a; margin: 0; }
         h1 { font-size: 12pt; font-weight: bold; color: #000; margin-top: 1.5em; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #eaeaea; }
         h1:first-child { margin-top: 0; }
@@ -202,7 +210,20 @@ class PdfWorker(QObject):
         table td { padding: 10px 8px; border: 1px solid #e0e0e0; color: #222; }
         table tr:nth-child(even) { background: #fafafa; }
         table tr:hover { background: #f0f4ff; }
+        .labels-container { margin-top: 10px; margin-bottom: 10px; }
+        .label { background-color: #e7e7e7; color: #333; padding: 3px 8px; border-radius: 12px; font-size: 9pt; margin-right: 5px; }
         """
+        
+    def _image_to_base64_uri(self, image_path):
+        """Converts a local image file to a base64 data URI."""
+        mime_type, _ = mimetypes.guess_type(image_path)
+        if not mime_type:
+            mime_type = 'application/octet-stream'  # Default MIME type
+
+        with open(image_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode()
+        
+        return f"data:{mime_type};base64,{encoded_string}"
 
     def stop(self):
         """Stops the worker thread."""
