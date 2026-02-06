@@ -11,3 +11,7 @@ __pycache__/
 # Temporary files
 _temp.html
 _temp_page.pdf
+
+# Configurations
+configs.json
+config.json

@@ -2,10 +2,12 @@ import sys
 import os
 import re
 import threading
+import json
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFileDialog, QMessageBox, QLineEdit,
-    QDialog, QListWidget, QListWidgetItem, QDialogButtonBox
+    QDialog, QListWidget, QListWidgetItem, QDialogButtonBox,
+    QComboBox, QInputDialog
 )
 from PySide6.QtCore import Qt
 from pdf_processor import PdfWorker
@@ -109,10 +111,15 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("QBank PDF Generator")
-        self.setGeometry(100, 100, 700, 250)
+        self.setGeometry(100, 100, 700, 350)
+
+        # --- Config Data ---
+        self.config_file = "configs.json"
+        self.configs = {}
 
         # --- Member variables ---
         self.root_folder_path = ""
+        self.output_folder_path = ""
         self.selected_folders = []
 
         # --- Central Widget and Layout ---
@@ -120,28 +127,50 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
+        # --- Config Management UI ---
+        config_layout = QHBoxLayout()
+        config_layout.addWidget(QLabel("Config:"))
+        self.config_combo = QComboBox()
+        self.config_combo.setPlaceholderText("Select a config...")
+        self.config_combo.activated.connect(self.load_configuration)
+        config_layout.addWidget(self.config_combo)
+
+        save_config_btn = QPushButton("Save Config")
+        save_config_btn.clicked.connect(self.save_configuration)
+        config_layout.addWidget(save_config_btn)
+
+        delete_config_btn = QPushButton("Delete Config")
+        delete_config_btn.clicked.connect(self.delete_configuration)
+        config_layout.addWidget(delete_config_btn)
+        main_layout.addLayout(config_layout)
+
         # --- Root Folder Selection UI ---
         root_folder_layout = QHBoxLayout()
         root_folder_layout.addWidget(QLabel("Root Folder:"))
         self.root_folder_label = QLineEdit("No folder selected...")
         self.root_folder_label.setReadOnly(True)
         root_folder_layout.addWidget(self.root_folder_label)
-        choose_root_folder_button = QPushButton("Choose Folder...")
+        
+        choose_root_folder_button = QPushButton("Browse...")
         choose_root_folder_button.clicked.connect(self.select_root_folder)
         root_folder_layout.addWidget(choose_root_folder_button)
+
+        select_modules_button = QPushButton("Select Modules...")
+        select_modules_button.clicked.connect(self.open_module_selection)
+        root_folder_layout.addWidget(select_modules_button)
         main_layout.addLayout(root_folder_layout)
 
-        # --- Output File Selection UI ---
-        output_file_layout = QHBoxLayout()
-        output_file_layout.addWidget(QLabel("Output PDF:"))
-        self.output_path_label = QLineEdit("No file specified...")
-        self.output_path_label.setReadOnly(True)
-        self.output_path_label.textChanged.connect(self.validate_inputs)
-        output_file_layout.addWidget(self.output_path_label)
-        choose_output_button = QPushButton("Set Output File...")
-        choose_output_button.clicked.connect(self.select_output_file)
-        output_file_layout.addWidget(choose_output_button)
-        main_layout.addLayout(output_file_layout)
+        # --- Output Folder Selection UI ---
+        output_folder_layout = QHBoxLayout()
+        output_folder_layout.addWidget(QLabel("Output Folder:"))
+        self.output_folder_label = QLineEdit("No folder selected...")
+        self.output_folder_label.setReadOnly(True)
+        output_folder_layout.addWidget(self.output_folder_label)
+        
+        choose_output_button = QPushButton("Browse...")
+        choose_output_button.clicked.connect(self.select_output_folder)
+        output_folder_layout.addWidget(choose_output_button)
+        main_layout.addLayout(output_folder_layout)
 
         # --- Selected Folders Info Label ---
         self.selected_folders_label = QLabel("Selected folders: 0")
@@ -156,23 +185,106 @@ class MainWindow(QMainWindow):
         bottom_layout.addWidget(self.status_label, 1) # Give it more space
         main_layout.addLayout(bottom_layout)
 
+        # --- Initialize Configs ---
+        self.load_all_configs()
+        self.populate_config_combo()
         self.validate_inputs() # Set initial state of the start button
+
+    # --- Config Methods ---
+    def load_all_configs(self):
+        """Loads all configurations from the JSON file."""
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    self.configs = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                self.configs = {}
+
+    def save_all_configs(self):
+        """Saves all configurations to the JSON file."""
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.configs, f, indent=4)
+        except IOError as e:
+            QMessageBox.critical(self, "Error", f"Could not save configs to file: {e}")
+
+    def populate_config_combo(self):
+        """Populates the config dropdown menu."""
+        self.config_combo.clear()
+        self.config_combo.addItem("Select a config...")
+        self.config_combo.addItems(sorted(self.configs.keys()))
+
+    def save_configuration(self):
+        """Prompts for a name and saves the current paths as a configuration."""
+        config_name, ok = QInputDialog.getText(self, "Save Configuration", "Enter a name for this configuration:")
+        if ok and config_name:
+            self.configs[config_name] = {
+                "root_path": self.root_folder_path,
+                "output_folder": self.output_folder_path
+            }
+            self.save_all_configs()
+            self.populate_config_combo()
+            self.config_combo.setCurrentText(config_name)
+            QMessageBox.information(self, "Success", f"Configuration '{config_name}' saved.")
+
+    def load_configuration(self):
+        """Loads the paths from the selected configuration."""
+        config_name = self.config_combo.currentText()
+        if config_name and config_name != "Select a config...":
+            config_data = self.configs.get(config_name)
+            if config_data:
+                self.root_folder_path = config_data.get("root_path", "")
+                self.root_folder_label.setText(self.root_folder_path if self.root_folder_path else "No folder selected...")
+                
+                self.output_folder_path = config_data.get("output_folder", "")
+                self.output_folder_label.setText(self.output_folder_path if self.output_folder_path else "No folder selected...")
+                
+                # Reset selected folders when changing config
+                self.selected_folders = []
+                self.selected_folders_label.setText("Selected folders: 0")
+                self.validate_inputs()
+
+    def delete_configuration(self):
+        """Deletes the currently selected configuration."""
+        config_name = self.config_combo.currentText()
+        if config_name and config_name != "Select a config...":
+            reply = QMessageBox.question(self, "Delete Configuration",
+                                       f"Are you sure you want to delete '{config_name}'?",
+                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                if config_name in self.configs:
+                    del self.configs[config_name]
+                    self.save_all_configs()
+                    self.populate_config_combo()
+                    QMessageBox.information(self, "Success", f"Configuration '{config_name}' deleted.")
 
     def select_root_folder(self):
         """
-        Opens a dialog to select the root folder and then opens the
-        folder selection dialog.
+        Opens a dialog to select the root folder.
         """
-        folder_path = QFileDialog.getExistingDirectory(self, "Select the Root Folder")
+        folder_path = QFileDialog.getExistingDirectory(self, "Select the Root Folder", self.root_folder_path)
         if not folder_path:
             return
 
         self.root_folder_path = folder_path
         self.root_folder_label.setText(folder_path)
+        
+        # Reset selected folders when root changes
+        self.selected_folders = []
+        self.selected_folders_label.setText("Selected folders: 0")
+        self.validate_inputs()
+
+    def open_module_selection(self):
+        """
+        Opens the folder selection and ordering dialog for sub-folders.
+        """
+        if not self.root_folder_path or not os.path.exists(self.root_folder_path):
+            QMessageBox.warning(self, "No Root Folder", "Please select a valid root folder first.")
+            return
 
         try:
             # Find all subdirectories in the selected root folder
-            subfolders = [d for d in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, d))]
+            subfolders = [d for d in os.listdir(self.root_folder_path) if os.path.isdir(os.path.join(self.root_folder_path, d))]
             subfolders.sort(key=natural_sort_key) # Use natural sorting
 
             if not subfolders:
@@ -188,21 +300,27 @@ class MainWindow(QMainWindow):
                 self.selected_folders = [os.path.join(self.root_folder_path, f) for f in dialog.get_selected_folders_in_order()]
                 self.selected_folders_label.setText(f"Selected folders: {len(self.selected_folders)}")
             else:
-                self.selected_folders = [] # User cancelled
-                self.selected_folders_label.setText("Selected folders: 0")
+                # Keep existing selection if cancelled?
+                # Actually, the original code reset it to empty if cancelled.
+                # Let's keep it as is for consistency, but maybe it's better to keep old selection.
+                # The original code: self.selected_folders = [] # User cancelled
+                pass
+                
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not read sub-folders: {e}")
             self.selected_folders = []
 
         self.validate_inputs()
 
-    def select_output_file(self):
+    def select_output_folder(self):
         """
-        Opens a dialog to specify the save location for the output PDF.
+        Opens a dialog to specify the default output folder.
         """
-        filepath, _ = QFileDialog.getSaveFileName(self, "Specify Output PDF File", "", "PDF Files (*.pdf)")
-        if filepath:
-            self.output_path_label.setText(filepath)
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.output_folder_path)
+        if folder_path:
+            self.output_folder_path = folder_path
+            self.output_folder_label.setText(folder_path)
+        self.validate_inputs()
 
     def validate_inputs(self):
         """
@@ -211,21 +329,28 @@ class MainWindow(QMainWindow):
         """
         is_valid = (
             bool(self.selected_folders) and
-            "No file specified..." not in self.output_path_label.text()
+            os.path.isdir(self.output_folder_path)
         )
         self.start_button.setEnabled(is_valid)
 
     def start_processing(self):
         """
         Kicks off the PDF generation process in a background thread.
+        Prompts for a filename first.
         """
+        # Prompt for output file name in the selected output folder
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, "Save PDF As", self.output_folder_path, "PDF Files (*.pdf)"
+        )
+        
+        if not filepath:
+            return
+
         self.start_button.setEnabled(False)
         self.status_label.setText("Status: Starting...")
 
-        output_path = self.output_path_label.text()
-
         # --- Setup and run worker thread ---
-        self.worker = PdfWorker(self.selected_folders, output_path)
+        self.worker = PdfWorker(self.selected_folders, filepath)
         self.thread = threading.Thread(target=self.worker.run)
         self.worker.signals.progress.connect(self.update_status)
         self.worker.signals.finished.connect(self.on_processing_finished)

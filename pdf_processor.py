@@ -119,8 +119,25 @@ class PdfWorker(QObject):
         <body>
         """
 
+        current_folder = None
         # Append each question formatted as an HTML block
         for question in questions:
+            folder = question.get('base_path')
+            if folder != current_folder:
+                folder_name = os.path.basename(folder)
+                # Transform output_X to Module X
+                if folder_name.startswith('output_'):
+                    display_name = folder_name.replace('output_', 'Module ')
+                else:
+                    display_name = folder_name.replace('_', ' ').title()
+                
+                html += f"""
+                <div class="module-header-page">
+                    <h1>{display_name}</h1>
+                </div>
+                <div class="page-break"></div>
+                """
+                current_folder = folder
             html += self._format_question_as_html(question)
 
         html += "</body></html>"
@@ -212,6 +229,8 @@ class PdfWorker(QObject):
         table tr:hover { background: #f0f4ff; }
         .labels-container { margin-top: 10px; margin-bottom: 10px; }
         .label { background-color: #e7e7e7; color: #333; padding: 3px 8px; border-radius: 12px; font-size: 9pt; margin-right: 5px; }
+        .module-header-page { text-align: center; padding-top: 40%; }
+        .module-header-page h1 { font-size: 40pt; border: none; color: #333; }
         """
         
     def _image_to_base64_uri(self, image_path):
