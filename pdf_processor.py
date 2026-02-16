@@ -34,12 +34,20 @@ class PdfWorker(QObject):
     def run(self):
         """The main worker logic that orchestrates the PDF generation."""
         try:
-            self.signals.progress.emit("Starting PDF generation process...")
+            self.generate_pdf(self.folders, self.output_pdf_path)
+            if self.is_running:
+                self.signals.finished.emit(f"Success! PDF saved to {self.output_pdf_path}")
+        except Exception as e:
+            self.signals.finished.emit(f"Error: {e}")
 
-            all_questions = self._parse_questions()
+    def generate_pdf(self, folders, output_pdf_path):
+        """Core logic to generate a PDF from a list of folders."""
+        try:
+            self.signals.progress.emit(f"Starting PDF generation for: {os.path.basename(output_pdf_path)}")
+
+            all_questions = self._parse_questions(folders)
             if not all_questions:
-                self.signals.finished.emit("Error: No questions found in the selected folders.")
-                return
+                raise ValueError("No questions found in the selected folders.")
 
             self.signals.progress.emit("Generating HTML content...")
             html_content = self._generate_html(all_questions)
@@ -60,7 +68,7 @@ class PdfWorker(QObject):
 
             # Use subprocess to run the Node.js script with arguments
             process = subprocess.Popen(
-                ['node', node_script_path, temp_html_path, self.output_pdf_path],
+                ['node', node_script_path, temp_html_path, output_pdf_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -71,29 +79,24 @@ class PdfWorker(QObject):
             if process.returncode != 0:
                 raise RuntimeError(f"Puppeteer script failed: {stderr}")
 
-            self.signals.progress.emit("PDF generation complete.")
-            self.signals.finished.emit(f"Success! PDF saved to {self.output_pdf_path}")
+            self.signals.progress.emit(f"PDF generation complete for {os.path.basename(output_pdf_path)}")
 
-        except Exception as e:
-            self.signals.finished.emit(f"Error: {e}")
         finally:
             # Ensure the temporary HTML file is cleaned up
             if 'temp_html_path' in locals() and os.path.exists(temp_html_path):
                 os.remove(temp_html_path)
 
-    def _parse_questions(self):
+    def _parse_questions(self, folders):
         """
         Parses 'questions.json' from all selected folders and aggregates the questions.
         """
         questions = []
-        for folder_path in self.folders:
+        for folder_path in folders:
             json_path = os.path.join(folder_path, 'questions.json')
             self.signals.progress.emit(f"Reading {json_path}...")
             if os.path.exists(json_path):
                 with open(json_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    # Add the base folder path to each question object.
-                    # This is crucial for resolving relative media paths later.
                     for q in data:
                         q['base_path'] = folder_path
                     questions.extend(data)
@@ -120,12 +123,10 @@ class PdfWorker(QObject):
         """
 
         current_folder = None
-        # Append each question formatted as an HTML block
         for question in questions:
             folder = question.get('base_path')
             if folder != current_folder:
                 folder_name = os.path.basename(folder)
-                # Transform output_X to Module X
                 if folder_name.startswith('output_'):
                     display_name = folder_name.replace('output_', 'Module ')
                 else:
@@ -148,39 +149,30 @@ class PdfWorker(QObject):
         Converts a single question JSON object into its HTML representation.
         """
         q_html = f"<h1>Question {question.get('question_number', '')}</h1>"
-        # Convert markdown text to HTML
         question_text_html = markdown.markdown(question.get('text', ''), extensions=['tables'])
         q_html += f"<div class='question-text'>{question_text_html}</div>"
 
-        # --- Handle Question Image ---
         if question.get('question_media_path'):
-            # Normalize path separators for cross-platform compatibility
             media_path = question['question_media_path'].replace('\\', '/')
             img_path = os.path.join(question['base_path'], media_path)
             if os.path.exists(img_path):
-                # Convert image to base64 and embed it directly in the HTML
                 img_uri = self._image_to_base64_uri(img_path)
                 q_html += f'<img src="{img_uri}" alt="Question Image" style="max-width: 100%; height: auto;"/>'
 
-        # --- Handle Options ---
         q_html += "<div>"
         correct_answer_text = "N/A"
         for option in question.get('options', []):
             if option.get('is_correct_answer', False):
                 correct_answer_text = option.get('text', '')
-            # Display the option text. The correct one will be bolded later.
             q_html += f"<p>{option.get('text', '')}</p>"
         q_html += "</div>"
 
-        # --- Display Correct Answer in Bold ---
         q_html += f"<p><b>Correct Answer: {correct_answer_text}</b></p>"
 
-        # --- Handle Labels (Question Tags) ---
         if question.get('labels'):
             labels_html = " ".join([f"<span class='label'>{label}</span>" for label in question.get('labels', [])])
             q_html += f"<div class='labels-container'>{labels_html}</div>"
 
-        # --- Handle Explanation Elements ---
         q_html += "<h2>Explanation</h2>"
         for element in question.get('explanation_elements', []):
             if element.get('type') == 'text':
@@ -192,7 +184,6 @@ class PdfWorker(QObject):
                     img_uri = self._image_to_base64_uri(img_path)
                     q_html += f'<img src="{img_uri}" alt="Explanation Image" style="max-width: 100%; height: auto;"/>'
             elif element.get('type') == 'table_processed_vlm':
-                # Convert the JSON table data into an HTML table
                 table_data = element.get('data', {}).get('table', [])
                 if table_data:
                     headers = table_data[0].keys()
@@ -207,7 +198,7 @@ class PdfWorker(QObject):
                         q_html += "</tr>"
                     q_html += "</tbody></table>"
 
-        q_html += "<div class='page-break'></div>" # Adds a page break after each question
+        q_html += "<div class='page-break'></div>"
         return q_html
 
     def _get_css_styles(self):
@@ -237,7 +228,7 @@ class PdfWorker(QObject):
         """Converts a local image file to a base64 data URI."""
         mime_type, _ = mimetypes.guess_type(image_path)
         if not mime_type:
-            mime_type = 'application/octet-stream'  # Default MIME type
+            mime_type = 'application/octet-stream'
 
         with open(image_path, "rb") as image_file:
             encoded_string = base64.b64encode(image_file.read()).decode()
@@ -247,3 +238,40 @@ class PdfWorker(QObject):
     def stop(self):
         """Stops the worker thread."""
         self.is_running = False
+
+class BatchPdfWorker(PdfWorker):
+    """
+    Worker thread for processing multiple PDF generation tasks sequentially.
+    """
+    def __init__(self, tasks):
+        # We don't need to call super().__init__ with specific folders/path 
+        # because we'll iterate through tasks in run().
+        super().__init__([], "") 
+        self.tasks = tasks # List of (folders, output_path)
+
+    def run(self):
+        """Iterates through all tasks and generates PDFs."""
+        total = len(self.tasks)
+        success_count = 0
+        error_messages = []
+
+        for i, (folders, output_path) in enumerate(self.tasks):
+            if not self.is_running:
+                break
+            
+            try:
+                self.signals.progress.emit(f"Processing task {i+1} of {total}...")
+                self.generate_pdf(folders, output_path)
+                success_count += 1
+            except Exception as e:
+                error_msg = f"Error in task {i+1} ({os.path.basename(output_path)}): {e}"
+                self.signals.progress.emit(error_msg)
+                error_messages.append(error_msg)
+
+        if not self.is_running:
+            self.signals.finished.emit("Batch processing stopped by user.")
+        elif error_messages:
+            summary = f"Batch completed with errors. {success_count}/{total} successful.\n" + "\n".join(error_messages)
+            self.signals.finished.emit(summary)
+        else:
+            self.signals.finished.emit(f"Batch completed successfully! {success_count} PDFs generated.")

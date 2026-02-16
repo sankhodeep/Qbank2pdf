@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox, QInputDialog
 )
 from PySide6.QtCore import Qt
-from pdf_processor import PdfWorker
+from pdf_processor import PdfWorker, BatchPdfWorker
 
 def natural_sort_key(s):
     """
@@ -181,6 +181,11 @@ class MainWindow(QMainWindow):
         self.start_button = QPushButton("Start Generation")
         self.start_button.clicked.connect(self.start_processing)
         bottom_layout.addWidget(self.start_button)
+
+        self.batch_button = QPushButton("Batch Generate All")
+        self.batch_button.clicked.connect(self.start_batch_processing)
+        bottom_layout.addWidget(self.batch_button)
+
         self.status_label = QLabel("Status: Ready")
         bottom_layout.addWidget(self.status_label, 1) # Give it more space
         main_layout.addLayout(bottom_layout)
@@ -324,7 +329,7 @@ class MainWindow(QMainWindow):
 
     def validate_inputs(self):
         """
-        Enable or disable the start button based on whether all necessary
+        Enable or disable the buttons based on whether all necessary
         inputs have been provided.
         """
         is_valid = (
@@ -332,6 +337,70 @@ class MainWindow(QMainWindow):
             os.path.isdir(self.output_folder_path)
         )
         self.start_button.setEnabled(is_valid)
+
+        # Batch button only needs root folder and output folder
+        is_batch_valid = (
+            bool(self.root_folder_path) and 
+            os.path.isdir(self.root_folder_path) and
+            os.path.isdir(self.output_folder_path)
+        )
+        self.batch_button.setEnabled(is_batch_valid)
+
+    def start_batch_processing(self):
+        """
+        Automatically finds all modules and generates separate PDFs for each.
+        """
+        if not self.root_folder_path or not os.path.isdir(self.root_folder_path):
+            QMessageBox.warning(self, "Invalid Root", "Please select a valid root folder.")
+            return
+
+        try:
+            subfolders = [d for d in os.listdir(self.root_folder_path) if os.path.isdir(os.path.join(self.root_folder_path, d))]
+            subfolders.sort(key=natural_sort_key)
+
+            if not subfolders:
+                QMessageBox.information(self, "No Folders", "No sub-folders found in the root directory.")
+                return
+
+            tasks = []
+            for folder_name in subfolders:
+                folder_path = os.path.join(self.root_folder_path, folder_name)
+                # Check if questions.json exists
+                if not os.path.exists(os.path.join(folder_path, 'questions.json')):
+                    continue
+                    
+                # Determine display name for PDF filename
+                if folder_name.startswith('output_'):
+                    display_name = folder_name.replace('output_', 'Module ')
+                else:
+                    display_name = folder_name.replace('_', ' ').title()
+                
+                output_pdf_path = os.path.join(self.output_folder_path, f"{display_name}.pdf")
+                tasks.append(([folder_path], output_pdf_path))
+
+            if not tasks:
+                QMessageBox.information(self, "No Valid Modules", "No folders with 'questions.json' were found.")
+                return
+
+            reply = QMessageBox.question(self, "Confirm Batch", 
+                                        f"Found {len(tasks)} modules. Start batch generation?",
+                                        QMessageBox.Yes | QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+
+            self.start_button.setEnabled(False)
+            self.batch_button.setEnabled(False)
+            self.status_label.setText("Status: Batch Starting...")
+
+            # --- Setup and run worker thread ---
+            self.worker = BatchPdfWorker(tasks)
+            self.thread = threading.Thread(target=self.worker.run)
+            self.worker.signals.progress.connect(self.update_status)
+            self.worker.signals.finished.connect(self.on_processing_finished)
+            self.thread.start()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to start batch: {e}")
 
     def start_processing(self):
         """
@@ -347,6 +416,7 @@ class MainWindow(QMainWindow):
             return
 
         self.start_button.setEnabled(False)
+        self.batch_button.setEnabled(False)
         self.status_label.setText("Status: Starting...")
 
         # --- Setup and run worker thread ---
@@ -367,9 +437,9 @@ class MainWindow(QMainWindow):
         """
         Handles the completion signal from the worker thread.
         """
-        if message.startswith("Error"):
-            QMessageBox.critical(self, "Error", message)
-            self.status_label.setText("Status: Error!")
+        if message.startswith("Error") or "Error" in message:
+            QMessageBox.critical(self, "Finished with issues", message)
+            self.status_label.setText("Status: Finished with errors")
         else:
             QMessageBox.information(self, "Success", message)
             self.status_label.setText("Status: Ready")
